@@ -664,6 +664,7 @@ jobs:
     if: startsWith(github.ref, 'refs/tags/v') || github.ref == 'refs/heads/dev'
     needs:
       - Build-Linux-Ubuntu
+      - test-linux
       - Build-Windows
       - Build-MacOS
       - Build-Android
