@@ -113,8 +113,11 @@ PageType {
                     target: codeField.textField
 
                     function onTextChanged() {
-                        // Codes are [A-Z0-9]; drop spaces, line breaks and any text pasted around the code
-                        var cleaned = codeField.textField.text.toUpperCase().replace(/[^A-Z0-9]/g, "").slice(0, 6)
+                        // Codes are [A-Z0-9]; a paste like "Code: ABC123" keeps its standalone 6-char word,
+                        // otherwise drop spaces, line breaks and any text pasted around the code
+                        var upper = codeField.textField.text.toUpperCase()
+                        var word = upper.match(/(?:^|[^A-Z0-9])([A-Z0-9]{6})(?![A-Z0-9])/)
+                        var cleaned = word ? word[1] : upper.replace(/[^A-Z0-9]/g, "").slice(0, 6)
                         if (cleaned !== codeField.textField.text) {
                             codeField.textField.text = cleaned
                         }
