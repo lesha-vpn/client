@@ -234,6 +234,12 @@ void CoreSignalHandlers::initAndroidSettingsHandler()
     connect(m_coreController->m_serversRepository, &SecureServersRepository::serverEdited, this, saveDefaultServerConfig);
     connect(m_coreController->m_serversRepository, &SecureServersRepository::serverAdded, this, saveDefaultServerConfig);
     connect(m_coreController->m_serversRepository, &SecureServersRepository::defaultServerChanged, this, saveDefaultServerConfig);
+    // The saved config also carries the coordinator bypass (the API address, only while signed in)
+    const auto saveCurrentDefaultServerConfig = [this, saveDefaultServerConfig]() {
+        saveDefaultServerConfig(m_coreController->m_serversRepository->defaultServerId());
+    };
+    connect(m_coreController->m_coordinatorController, &CoordinatorController::apiAddressChanged, this, saveCurrentDefaultServerConfig);
+    connect(m_coreController->m_coordinatorController, &CoordinatorController::loggedInChanged, this, saveCurrentDefaultServerConfig);
 #endif
 }
 

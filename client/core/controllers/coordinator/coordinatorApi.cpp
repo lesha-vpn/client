@@ -59,30 +59,35 @@ void CoordinatorApi::login(const QString &code, const QString &deviceLabel, cons
     if (!deviceLabel.isEmpty()) {
         body[QStringLiteral("deviceLabel")] = deviceLabel;
     }
-    send("POST", QStringLiteral("/auth/login"), &body, false, callback);
+    send("POST", QStringLiteral("/auth/login"), &body, m_baseUrl, QString(), callback);
 }
 
 void CoordinatorApi::logout(const Callback &callback)
 {
+    logout(m_baseUrl, m_token, callback);
+}
+
+void CoordinatorApi::logout(const QString &baseUrl, const QString &token, const Callback &callback)
+{
     const QJsonObject body;
-    send("POST", QStringLiteral("/auth/logout"), &body, true, callback);
+    send("POST", QStringLiteral("/auth/logout"), &body, baseUrl, token, callback);
 }
 
 void CoordinatorApi::me(const Callback &callback)
 {
-    send("GET", QStringLiteral("/me"), nullptr, true, callback);
+    send("GET", QStringLiteral("/me"), nullptr, m_baseUrl, m_token, callback);
 }
 
 void CoordinatorApi::createConfig(const QString &name, const Callback &callback)
 {
     QJsonObject body;
     body[QStringLiteral("name")] = name;
-    send("POST", QStringLiteral("/configs"), &body, true, callback);
+    send("POST", QStringLiteral("/configs"), &body, m_baseUrl, m_token, callback);
 }
 
 void CoordinatorApi::getConfig(const QString &configId, const Callback &callback)
 {
-    send("GET", QStringLiteral("/configs/") + encodeSegment(configId), nullptr, true, callback);
+    send("GET", QStringLiteral("/configs/") + encodeSegment(configId), nullptr, m_baseUrl, m_token, callback);
 }
 
 void CoordinatorApi::configStatus(const QString &configId, const QString &revision, const Callback &callback)
@@ -90,19 +95,19 @@ void CoordinatorApi::configStatus(const QString &configId, const QString &revisi
     QUrlQuery query;
     query.addQueryItem(QStringLiteral("revision"), revision);
     send("GET", QStringLiteral("/configs/%1/status?%2").arg(encodeSegment(configId), query.toString(QUrl::FullyEncoded)), nullptr,
-         true, callback);
+         m_baseUrl, m_token, callback);
 }
 
 void CoordinatorApi::deleteConfig(const QString &configId, const Callback &callback)
 {
-    send("DELETE", QStringLiteral("/configs/") + encodeSegment(configId), nullptr, true, callback);
+    send("DELETE", QStringLiteral("/configs/") + encodeSegment(configId), nullptr, m_baseUrl, m_token, callback);
 }
 
 void CoordinatorApi::renameConfig(const QString &configId, const QString &name, const Callback &callback)
 {
     QJsonObject body;
     body[QStringLiteral("name")] = name;
-    send("PATCH", QStringLiteral("/configs/") + encodeSegment(configId), &body, true, callback);
+    send("PATCH", QStringLiteral("/configs/") + encodeSegment(configId), &body, m_baseUrl, m_token, callback);
 }
 
 QString CoordinatorApi::host() const
@@ -139,10 +144,10 @@ void CoordinatorApi::learnAddress()
     });
 }
 
-void CoordinatorApi::send(const QByteArray &verb, const QString &path, const QJsonObject *body, bool authorized,
-                          const Callback &callback, bool viaFallback)
+void CoordinatorApi::send(const QByteArray &verb, const QString &path, const QJsonObject *body, const QString &baseUrl,
+                          const QString &token, const Callback &callback, bool viaFallback)
 {
-    QUrl url(m_baseUrl + QStringLiteral("/v1") + path, QUrl::StrictMode);
+    QUrl url(baseUrl + QStringLiteral("/v1") + path, QUrl::StrictMode);
     const QString hostName = url.host();
     QNetworkRequest request;
     if (viaFallback) {
@@ -160,7 +165,6 @@ void CoordinatorApi::send(const QByteArray &verb, const QString &path, const QJs
     request.setRawHeader("Accept", "application/json");
     request.setRawHeader("X-Client-Request-ID", QUuid::createUuid().toString(QUuid::WithoutBraces).toUtf8());
     request.setRawHeader("X-App-Version", QByteArray(APP_FULL_VERSION));
-    const QString token = authorized ? m_token : QString();
     if (!token.isEmpty()) {
         request.setRawHeader("Authorization", "Bearer " + token.toUtf8());
     }
@@ -186,7 +190,7 @@ void CoordinatorApi::send(const QByteArray &verb, const QString &path, const QJs
     });
 
     const std::shared_ptr<QJsonObject> bodyCopy = body ? std::make_shared<QJsonObject>(*body) : nullptr;
-    connect(reply, &QNetworkReply::finished, this, [this, reply, sslErrors, callback, verb, path, bodyCopy, authorized,
+    connect(reply, &QNetworkReply::finished, this, [this, reply, sslErrors, callback, verb, path, bodyCopy, baseUrl,
                                                     viaFallback, hostName, token]() {
         Reply result;
         result.token = token;
@@ -224,7 +228,7 @@ void CoordinatorApi::send(const QByteArray &verb, const QString &path, const QJs
         const bool canRetry = !viaFallback && result.httpStatus == 0 && sslErrors->isEmpty() && !m_fallbackAddress.isEmpty()
                 && m_fallbackAddress != hostName && hostName == host() && (verb != "POST" || notSent);
         if (canRetry) {
-            send(verb, path, bodyCopy.get(), authorized, callback, true);
+            send(verb, path, bodyCopy.get(), baseUrl, token, callback, true);
             return;
         }
         if (!viaFallback && result.httpStatus != 0) {

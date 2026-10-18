@@ -43,6 +43,8 @@ public:
     void login(const QString &code, const QString &deviceLabel, const Callback &callback);
     // POST /v1/auth/logout -> 204
     void logout(const Callback &callback);
+    // Same, for an account captured earlier: the current base URL and token may already be reset by then
+    void logout(const QString &baseUrl, const QString &token, const Callback &callback);
     // GET /v1/me -> { user, configs: [ConfigSummary] }
     void me(const Callback &callback);
     // POST /v1/configs { name } -> 201 Config; 409 name_taken
@@ -69,8 +71,9 @@ signals:
     void addressLearned(const QString &address);
 
 private:
-    void send(const QByteArray &verb, const QString &path, const QJsonObject *body, bool authorized, const Callback &callback,
-              bool viaFallback = false);
+    // token: Bearer token to send, empty for none
+    void send(const QByteArray &verb, const QString &path, const QJsonObject *body, const QString &baseUrl, const QString &token,
+              const Callback &callback, bool viaFallback = false);
     void learnAddress();
 
     QNetworkAccessManager *m_networkManager;

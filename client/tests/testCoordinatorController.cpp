@@ -582,8 +582,27 @@ private slots:
         QVERIFY(!createPhone().isEmpty());
 
         m_controller->forgetDevice();
+        // "Reset all data" wipes the account right after forgetDevice() returns
+        m_core->m_appSettingsRepository->clearSettings();
+        QVERIFY(!m_controller->isLoggedIn());
+
         QTRY_COMPARE(m_server->requestsTo("POST", "/v1/auth/logout").size(), 1);
         QCOMPARE(m_server->requestsTo("DELETE", "/v1/configs/cfg-1").size(), 1);
+        // The token is revoked only after the configs are gone, or the deletes would fail with 401
+        int deleteIndex = -1;
+        int logoutIndex = -1;
+        for (int i = 0; i < m_server->requests.size(); ++i) {
+            const MockHttpServer::Request &request = m_server->requests.at(i);
+            if (request.method == "DELETE") {
+                deleteIndex = i;
+            } else if (request.method == "POST" && request.path == "/v1/auth/logout") {
+                logoutIndex = i;
+            }
+        }
+        QVERIFY(deleteIndex >= 0 && deleteIndex < logoutIndex);
+        QCOMPARE(m_server->requestsTo("POST", "/v1/auth/logout").first().headers.value("authorization"),
+                 "Bearer " + m_token.toUtf8());
+        QVERIFY(m_currentConfig.isEmpty());
     }
 
     void testDeviceConfigName_data()
@@ -858,6 +877,46 @@ private slots:
                      QStringLiteral("revoked"));
         QCOMPARE(errorSpy.count(), 1);
         QVERIFY(m_controller->isLoggedIn());
+
+        // A revoked config is not polled any more
+        m_controller->refreshAll();
+        QTest::qWait(200);
+        QCOMPARE(m_server->requestsTo("GET", "/v1/configs/cfg-1/status").size(), 1);
+    }
+
+    void testConcurrentChecksApplyOnce()
+    {
+        login();
+        const QString serverId = createPhone();
+        QVERIFY(!serverId.isEmpty());
+
+        m_currentConfig = configJson("cfg-1", "phone", "rev2", "198.51.100.7:51821");
+        m_statusState = "outdated";
+        QSignalSpy replacedSpy(m_controller, &CoordinatorController::configReplaced);
+        m_controller->refreshAll();
+        m_controller->refreshAll(); // e.g. the timer and a connection error at once
+        QTRY_COMPARE(replacedSpy.count(), 1);
+        QTest::qWait(200);
+        QCOMPARE(replacedSpy.count(), 1);
+        QCOMPARE(m_server->requestsTo("GET", "/v1/configs/cfg-1/status").size(), 1);
+        QCOMPARE(m_server->requestsTo("GET", "/v1/configs/cfg-1").size(), 1);
+    }
+
+    void testLoginToNewHostForgetsAddress()
+    {
+        // Signed out of another coordinator whose address is still known
+        m_core->m_appSettingsRepository->setCoordinatorBaseUrl(QStringLiteral("https://old.example.org"));
+        m_core->m_appSettingsRepository->setCoordinatorApiAddress(QStringLiteral("203.0.113.5"));
+        QSignalSpy addressSpy(m_controller, &CoordinatorController::apiAddressChanged);
+        login();
+        QVERIFY(m_core->m_appSettingsRepository->coordinatorApiAddress().isEmpty());
+        QCOMPARE(addressSpy.count(), 1);
+
+        // Signing in to the same host again keeps it
+        m_core->m_appSettingsRepository->setCoordinatorApiAddress(QStringLiteral("127.0.0.1"));
+        login();
+        QCOMPARE(m_core->m_appSettingsRepository->coordinatorApiAddress(), QStringLiteral("127.0.0.1"));
+        QCOMPARE(addressSpy.count(), 1);
     }
 
     void testImportKeepsIssuerMtu_data()
