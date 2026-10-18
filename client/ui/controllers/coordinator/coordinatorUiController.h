@@ -33,15 +33,10 @@ public:
     Q_INVOKABLE void login(const QString &baseUrl, const QString &code);
     Q_INVOKABLE void logout();
     Q_INVOKABLE void fetchRemoteConfigs();
-    Q_INVOKABLE void createConfig(const QString &name);
-    Q_INVOKABLE void addConfigToApp(const QString &configId);
     Q_INVOKABLE void deleteConfig(const QString &configId);
     Q_INVOKABLE void renameConfig(const QString &configId, const QString &name);
     Q_INVOKABLE void setupThisDevice();
-    Q_INVOKABLE void refreshAll();
-    Q_INVOKABLE bool isValidConfigName(const QString &name) const; // [a-z0-9-]{1,32}
     Q_INVOKABLE QString toConfigName(const QString &text) const; // free text -> [a-z0-9-]{0,32}, Cyrillic transliterated
-    Q_INVOKABLE bool isManagedServer(const QString &serverId) const;
     Q_INVOKABLE QString configIdForServer(const QString &serverId) const; // empty when not managed
     Q_INVOKABLE void forgetDevice(); // before "reset all data": revoke this app's configs and token on the server
 
