@@ -176,6 +176,9 @@ if(WIN32)
     )
 
     set(CMAKE_EXE_LINKER_FLAGS "${CMAKE_EXE_LINKER_FLAGS} /SUBSYSTEM:WINDOWS /ENTRY:mainCRTStartup")
+    # Fork: under Ninja (CI) CMake appends /subsystem:console after the flags above unless the
+    # target is a WIN32 executable, so the app got a console window that killed it when closed.
+    set_target_properties(${PROJECT} PROPERTIES WIN32_EXECUTABLE TRUE)
 endif()
 
 if(APPLE)

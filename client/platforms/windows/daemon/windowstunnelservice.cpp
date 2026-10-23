@@ -16,9 +16,12 @@
 #include "windowsdaemon.h"
 #include "version.h"
 
-#define TUNNEL_NAMED_PIPE \
-  "\\\\."                 \
-  "\\pipe\\ProtectedPrefix\\Administrators\\AmneziaWG\\AmneziaVPN"
+// tunnel.dll serves UAPI on a pipe named after the tunnel (the interface name passed to
+// WireGuardTunnelService), so it must follow s_interfaceName (fork: enp0s9, FORK.md §10).
+static QString tunnelNamedPipe() {
+  return QStringLiteral("\\\\.\\pipe\\ProtectedPrefix\\Administrators\\AmneziaWG\\") +
+         WireguardUtilsWindows::s_interfaceName();
+}
 
 constexpr uint32_t WINDOWS_TUNNEL_MONITOR_TIMEOUT_MSEC = 2000;
 
@@ -238,15 +241,16 @@ static bool stopAndDeleteTunnelService(SC_HANDLE service) {
 
 QString WindowsTunnelService::uapiCommand(const QString& command) {
   // Create a pipe to the tunnel service.
-  LPTSTR tunnelName = (LPTSTR)TEXT(TUNNEL_NAMED_PIPE);
-  HANDLE pipe = CreateFile(tunnelName, GENERIC_READ | GENERIC_WRITE, 0, nullptr,
+  const QString pipeName = tunnelNamedPipe();
+  LPCWSTR tunnelName = reinterpret_cast<LPCWSTR>(pipeName.utf16());
+  HANDLE pipe = CreateFileW(tunnelName, GENERIC_READ | GENERIC_WRITE, 0, nullptr,
                            OPEN_EXISTING, 0, nullptr);
   if (pipe == INVALID_HANDLE_VALUE) {
     return QString();
   }
 
   auto guard = qScopeGuard([&] { CloseHandle(pipe); });
-  if (!WaitNamedPipe(tunnelName, 1000)) {
+  if (!WaitNamedPipeW(tunnelName, 1000)) {
     WindowsUtils::windowsLog("Failed to wait for named pipes");
     return QString();
   }
