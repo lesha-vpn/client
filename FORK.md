@@ -143,7 +143,7 @@ Commit `affb205`. `.github/workflows/deploy.yml` is fully rewritten: builds Lesh
 (iOS optional via `vars.ENABLE_IOS`), runs tests on Linux, ships only the `.msi` on Windows (no Qt Installer Framework `.exe`), publishes a GitHub Release on `v*` tags and on every push to `dev` that bumps `LESHA_VERSION` (§8), uses repo var `COORDINATOR_API_URL`
 and optional signing secrets, never uploads to Amnezia's infra. Upstream's `tag-deploy.yml` and `tag-upload.yml` are deleted.
 Build-time trims: runs on `push` only (no `pull_request`, which built every PR commit twice); Android builds only
-`arm64-v8a` + `armeabi-v7a` (no x86 Qt installs) and a universal APK without AAB; all four builds use ccache (Windows builds with Ninja for that: `CMAKE_GENERATOR=Ninja`, and `deploy/build.bat` drops the MSBuild-only `/m` for Ninja); Qt installs are cached (`cache: true`, needs install-qt-action v4: v3 talks to the retired cache API), Android also caches conan packages and Gradle.
+`arm64-v8a` + `armeabi-v7a` (no x86 Qt installs) and a universal APK without AAB; all four builds use ccache (Windows builds with Ninja for that: `CMAKE_GENERATOR=Ninja`, and `deploy/build.bat` drops the MSBuild-only `/m` for Ninja; `client/CMakeLists.txt` marks the app `WIN32_EXECUTABLE`, because under Ninja CMake otherwise appends `/subsystem:console` and the app opens with a console window); Qt installs are cached (`cache: true`, needs install-qt-action v4: v3 talks to the retired cache API), Android also caches conan packages and Gradle.
 How to resolve: keep ours (`git checkout --ours .github/workflows/deploy.yml`; `git rm` the tag-* files if upstream modified them).
 Port only useful upstream changes manually (Qt version bump, new conan/toolchain steps, new required modules/packages).
 New upstream workflows: delete them unless they are generic and safe (no Amnezia secrets/servers).
@@ -340,6 +340,9 @@ always marks the connection as a VPN, so this applies to **Linux and Windows onl
   name can't match a real card by prefix). `iputilslinux.cpp` follows `WG_INTERFACE`.
 - Windows: `client/platforms/windows/daemon/wireguardutilswindows.h` `s_interfaceName()` returns `TUNNEL_INTERFACE_NAME`
   (the visible Wintun adapter name). The tunnel Windows service keeps its own internal name (`TUNNEL_SERVICE_NAME`), unchanged.
+  `windowstunnelservice.cpp` builds the UAPI pipe path (`\\.\pipe\ProtectedPrefix\Administrators\AmneziaWG\<tunnel>`)
+  from `s_interfaceName()`; upstream hardcoded `...\AmneziaWG\AmneziaVPN`, which no longer matched, so the peer was never
+  set and the app hung on "waiting for handshake".
 How to resolve: keep ours. If upstream adds a new place that hardcodes `amn0` for the interface, point it at `WG_INTERFACE`/`TUNNEL_INTERFACE_NAME`.
 
 ## 11. Settings, About and tray trimmed

@@ -37,6 +37,27 @@ constexpr QLatin1String displayName("displayName"); // server name the app last 
 } // namespace entryKey
 
 constexpr qint64 errorRefreshThrottleMsecs = 60 * 1000;
+
+// Windows has no flag emoji: a flag (two regional indicator symbols) renders as its letter code ("NL").
+// Drop the leading flag of the coordinator's "🇳🇱 Нидерланды" there.
+QString platformServerName(const QString &serverName)
+{
+#ifdef Q_OS_WIN
+    const QList<uint> codepoints = serverName.toUcs4();
+    qsizetype i = 0;
+    while (i < codepoints.size() && codepoints.at(i) >= 0x1F1E6 && codepoints.at(i) <= 0x1F1FF) {
+        ++i;
+    }
+    if (i > 0) {
+        const QString rest = QString::fromUcs4(reinterpret_cast<const char32_t *>(codepoints.constData() + i), codepoints.size() - i)
+                                     .trimmed();
+        if (!rest.isEmpty()) {
+            return rest;
+        }
+    }
+#endif
+    return serverName;
+}
 } // namespace
 
 CoordinatorController::CoordinatorController(SecureServersRepository *serversRepository,
@@ -684,7 +705,7 @@ bool CoordinatorController::applyConfig(const QJsonObject &config, const QString
     // The server is named after the exit country ("serverName"); older coordinators only send the config name
     const QString displayName = config.value("serverName").toString().trimmed().isEmpty()
             ? name
-            : config.value("serverName").toString().trimmed();
+            : platformServerName(config.value("serverName").toString().trimmed());
 
     QJsonObject serverJson = result.config;
     serverJson[configKey::description] = displayName;
