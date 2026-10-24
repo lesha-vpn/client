@@ -42,10 +42,9 @@ android {
 
         // keeps language resources for only the locales specified below
         resourceConfigurations += listOf("en", "ru", "b+zh+Hans")
-        // ndk.abiFilters is only used for single-ABI builds; multi-ABI uses splits below
-        if (abiList.size == 1) {
-            ndk.abiFilters += abiList
-        }
+        // Fork: one universal APK with every ABI in it. Upstream split multi-ABI builds per ABI and
+        // the copy step below kept only the last split, so armeabi-v7a devices got an arm64-only APK.
+        ndk.abiFilters += abiList
     }
 
     signingConfigs {
@@ -96,8 +95,8 @@ android {
 
     splits {
         abi {
-            // splits only make sense for multi-ABI builds; single-ABI uses ndk.abiFilters
-            isEnable = abiList.size > 1
+            // Fork: disabled, see ndk.abiFilters above
+            isEnable = false
             reset()
             include(*abiList.toTypedArray())
             isUniversalApk = false
