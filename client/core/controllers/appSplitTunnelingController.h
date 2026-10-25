@@ -14,6 +14,7 @@ public:
 
     bool addApp(const amnezia::InstalledAppInfo &appInfo);
     void removeApp(int index);
+    bool removeApp(const amnezia::InstalledAppInfo &appInfo);
     void clearAppsList();
     void setRouteMode(AppsRouteMode routeMode);
     void toggleSplitTunneling(bool enabled);

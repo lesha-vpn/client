@@ -43,6 +43,10 @@ private class App(pi: PackageInfo, pm: PackageManager, ai: ApplicationInfo? = pi
     val packageName: String = pi.packageName
     val icon: Boolean = (ai?.icon ?: 0) != 0
     val isLaunchable: Boolean = pm.getLaunchIntentForPackage(packageName) != null
+    // Lesha VPN: apps without a launcher entry and preinstalled apps that were never updated
+    // from the store are listed as system apps on the split tunneling screen
+    val isSystem: Boolean = !isLaunchable || ai == null ||
+        ((ai.flags and ApplicationInfo.FLAG_SYSTEM) != 0 && (ai.flags and ApplicationInfo.FLAG_UPDATED_SYSTEM_APP) == 0)
 
     init {
         val name = ai?.loadLabel(pm)?.toString()
@@ -68,6 +72,7 @@ private class App(pi: PackageInfo, pm: PackageManager, ai: ApplicationInfo? = pi
         jsonObject.put("name", name)
         jsonObject.put("icon", icon)
         jsonObject.put("launchable", isLaunchable)
+        jsonObject.put("system", isSystem)
         return jsonObject
     }
 }

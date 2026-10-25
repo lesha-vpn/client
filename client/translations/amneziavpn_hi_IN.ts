@@ -4214,6 +4214,21 @@ Create one from the current settings.</source>
 <context>
     <name>PageSettingsAppSplitTunneling</name>
     <message>
+        <location filename="../ui/qml/Pages2/PageSettingsAppSplitTunneling.qml" line="1"/>
+        <source>Selected</source>
+        <translation>चयनित</translation>
+    </message>
+    <message>
+        <location filename="../ui/qml/Pages2/PageSettingsAppSplitTunneling.qml" line="1"/>
+        <source>Apps</source>
+        <translation>ऐप्स</translation>
+    </message>
+    <message>
+        <location filename="../ui/qml/Pages2/PageSettingsAppSplitTunneling.qml" line="1"/>
+        <source>System apps</source>
+        <translation>सिस्टम ऐप्स</translation>
+    </message>
+    <message>
         <location filename="../ui/qml/Pages2/PageSettingsAppSplitTunneling.qml" line="27"/>
         <source>Cannot change split tunneling settings during active connection</source>
         <translation>सक्रिय कनेक्शन के दौरान स्प्लिट टनलिंग सेटिंग्स को नहीं बदला जा सकता</translation>

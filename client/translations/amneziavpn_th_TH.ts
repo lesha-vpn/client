@@ -4214,6 +4214,21 @@ Create one from the current settings.</source>
 <context>
     <name>PageSettingsAppSplitTunneling</name>
     <message>
+        <location filename="../ui/qml/Pages2/PageSettingsAppSplitTunneling.qml" line="1"/>
+        <source>Selected</source>
+        <translation>ที่เลือก</translation>
+    </message>
+    <message>
+        <location filename="../ui/qml/Pages2/PageSettingsAppSplitTunneling.qml" line="1"/>
+        <source>Apps</source>
+        <translation>แอป</translation>
+    </message>
+    <message>
+        <location filename="../ui/qml/Pages2/PageSettingsAppSplitTunneling.qml" line="1"/>
+        <source>System apps</source>
+        <translation>แอประบบ</translation>
+    </message>
+    <message>
         <location filename="../ui/qml/Pages2/PageSettingsAppSplitTunneling.qml" line="27"/>
         <source>Cannot change split tunneling settings during active connection</source>
         <translation>ไม่สามารถเปลี่ยนการตั้งค่าการแบ่งทาเนลระหว่างการเชื่อมต่อที่ใช้งานอยู่ได้</translation>
