@@ -580,6 +580,10 @@ jobs:
 
         APK=$(find deploy/build/client/android-build -maxdepth 1 -name '*.apk' | head -n1)
         test -n "$APK"
+        # the APK must carry native libs for every ABI built above (an armv7 TV got an arm64-only APK)
+        for abi in arm64-v8a armeabi-v7a; do
+          unzip -l "$APK" "lib/$abi/libLeshaVPN_$abi.so" >/dev/null || { echo "::error::no lib/$abi in $APK"; unzip -l "$APK" 'lib/*'; exit 1; }
+        done
         # LeshaVPN_<platform>_<version>.apk, hyphens inside <platform>
         mv "$APK" "$OUT/LeshaVPN_${LABEL}-universal${APK_SUFFIX}_${VERSION}.apk"
 
