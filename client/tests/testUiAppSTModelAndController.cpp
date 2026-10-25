@@ -1,6 +1,7 @@
 #include <QCoreApplication>
 #include <QDebug>
 #include <QFile>
+#include <QJsonArray>
 #include <QJsonDocument>
 #include <QJsonObject>
 #include <QProcessEnvironment>
@@ -13,6 +14,7 @@
 #include "core/models/serverDescription.h"
 #include "secureQSettings.h"
 #include "vpnConnection.h"
+#include "ui/models/installedAppsModel.h"
 
 using namespace amnezia;
 
@@ -93,6 +95,57 @@ private slots:
         m_coreController->m_appSplitTunnelingUiController->updateModel();
         QVERIFY2(finishedSpy.count() == 2, "finished signal should be emitted");
         QVERIFY2(m_coreController->m_appSplitTunnelingModel->rowCount() == 0, "AppSplitTunnelingModel should have 0 rows");
+    }
+    void testInstalledAppsCheckboxList()
+    {
+        auto *uiController = m_coreController->m_appSplitTunnelingUiController;
+        uiController->setRouteMode(static_cast<int>(AppsRouteMode::VpnAllExceptApps));
+
+        uiController->setPackageInList("Telegram", "org.telegram", true);
+        uiController->setPackageInList("Gone", "com.removed", true);
+        uiController->setPackageInList("Telegram", "org.telegram", true);
+        QCOMPARE(uiController->getPackagesInList().size(), 2);
+
+        auto app = [](const QString &package, const QString &name, bool system) {
+            return QJsonObject { { "package", package }, { "name", name }, { "system", system } };
+        };
+        const QJsonArray installed { app("com.android.settings", "Settings", true), app("ru.yandex", "яндекс", false),
+                                     app("com.whatsapp", "WhatsApp", false), app("org.telegram", "Telegram", false),
+                                     app("com.android.phone", "", true), app("app.b", "Браузер", false) };
+
+        InstalledAppsModel model;
+        model.setApps(installed, uiController->getPackagesInList());
+
+        auto column = [&model](int role) {
+            QStringList values;
+            for (int i = 0; i < model.rowCount(); ++i) {
+                values << model.data(model.index(i), role).toString();
+            }
+            return values;
+        };
+        QCOMPARE(column(InstalledAppsModel::PackageNameRole),
+                 QStringList({ "com.removed", "org.telegram", "com.whatsapp", "app.b", "ru.yandex", "com.android.phone",
+                               "com.android.settings" }));
+        QCOMPARE(column(InstalledAppsModel::GroupRole), QStringList({ "0", "0", "1", "1", "1", "2", "2" }));
+        QCOMPARE(model.data(model.index(5), InstalledAppsModel::AppNameRole).toString(), QString("com.android.phone"));
+
+        // toggling keeps the order; the list itself changes right away
+        model.setAppSelected(1, false);
+        uiController->setPackageInList("Telegram", "org.telegram", false);
+        model.setAppSelected(2, true);
+        uiController->setPackageInList("WhatsApp", "com.whatsapp", true);
+        QCOMPARE(model.data(model.index(1), InstalledAppsModel::PackageNameRole).toString(), QString("org.telegram"));
+        QCOMPARE(model.data(model.index(1), InstalledAppsModel::IsAppSelectedRole).toBool(), false);
+        QCOMPARE(model.data(model.index(2), InstalledAppsModel::IsAppSelectedRole).toBool(), true);
+
+        // reopening the page re-sorts
+        model.setApps(installed, uiController->getPackagesInList());
+        QCOMPARE(column(InstalledAppsModel::PackageNameRole).mid(0, 3), QStringList({ "com.removed", "com.whatsapp", "org.telegram" }));
+        QCOMPARE(column(InstalledAppsModel::GroupRole).mid(0, 3), QStringList({ "0", "0", "1" }));
+
+        // the other mode has its own list
+        uiController->setRouteMode(static_cast<int>(AppsRouteMode::VpnOnlyForwardApps));
+        QCOMPARE(uiController->getPackagesInList().size(), 0);
     }
 };
 

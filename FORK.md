@@ -371,6 +371,20 @@ split tunneling included) to the service without connecting.
 How to resolve: keep the hunks; if upstream changes how `connect()` / `LAST_CONF` work in the service, keep a way to
 update the saved config without connecting.
 
+## 13. Android: app split tunneling page is the checkbox list of installed apps
+Upstream's page listed only the added apps (with trash buttons) and a "+" opened `InstalledAppsDrawer` to pick more. On
+Android the page itself now lists every installed app with a checkbox; a toggle adds/removes the app from the current mode's
+list right away. Order is fixed when the page opens (or the mode changes): checked apps, user apps, system apps, each
+alphabetically (`QCollator`), so a toggled row stays in place until the page is reopened. Apps from the list that are no
+longer installed are shown checked so they can be removed. Windows keeps upstream's file list.
+- `ui/qml/Pages2/PageSettingsAppSplitTunneling.qml` (Android branch, `isAndroid`), `ui/qml/Components/InstalledAppsDrawer.qml`
+  deleted (and from `qml.qrc`).
+- `ui/models/installedAppsModel.{h,cpp}` rewritten (`setApps`, `updateModel(savedApps)`, `setAppSelected`, `group` role).
+- `AppSplitTunnelingUiController::setPackageInList` / `getPackagesInList`, `AppSplitTunnelingController::removeApp(InstalledAppInfo)`.
+- `android/src/org/amnezia/vpn/AppListProvider.kt`: `system` flag (no launcher entry, or preinstalled and never updated).
+- Test: `tests/testUiAppSTModelAndController.cpp` (`testInstalledAppsCheckboxList`). Strings `Selected`, `Apps`, `System apps`.
+How to resolve: keep the fork's page/model; if upstream changes the drawer or the model, port its fixes into the page.
+
 ## Translations
 Fork UI strings are **English source text** in `qsTr()`/`tr()`, like upstream's, and every fork string has a finished
 translation in all 12 shipped `client/translations/amneziavpn_*.ts` (ru_RU, uk_UA, es_ES, fr_FR, ar_EG, fa_IR, hi_IN, ko_KR,
@@ -379,7 +393,7 @@ my_MM, th_TH, ur_PK, zh_CN). The brand stays «Лёша VPN» in every language;
 Fork entries in the `.ts` files: contexts `CoordinatorController`, `PageCoordinatorConfigs`, `PageCoordinatorLogin` (fork-only),
 `ProtocolSettingsUiController`, `ServersUiController` (strings moved out of upstream's deleted `InstallUiController`, §9.2), and
 fork strings added to the upstream contexts `PageSettings`, `PageSettingsAbout`, `PageSettingsApplication`, `PageSettingsLogging`,
-`PageSettingsServerData`, `PageSetupWizardConfigSource`.
+`PageSettingsServerData`, `PageSetupWizardConfigSource`, `PageSettingsAppSplitTunneling`.
 - A new or changed fork string must be added to **every** `.ts` in the same change (a QML string's context is the file's basename).
   The fork's `.ts` files are edited by hand / script: don't run a full `lupdate` over them, it would mark hundreds of strings
   of the features removed in §9 as vanished. To find untranslated fork strings, run `lupdate` over the current tree and over

@@ -35,6 +35,17 @@ void AppSplitTunnelingController::removeApp(int index)
     m_appSettingsRepository->setVpnApps(m_currentRouteMode, m_apps);
 }
 
+bool AppSplitTunnelingController::removeApp(const amnezia::InstalledAppInfo &appInfo)
+{
+    const int index = m_apps.indexOf(appInfo);
+    if (index < 0) {
+        return false;
+    }
+
+    removeApp(index);
+    return true;
+}
+
 void AppSplitTunnelingController::clearAppsList()
 {
     m_apps.clear();

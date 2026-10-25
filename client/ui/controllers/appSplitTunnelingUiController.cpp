@@ -50,6 +50,32 @@ void AppSplitTunnelingUiController::removeApp(const int index)
     emit finished(tr("Application removed: %1").arg(fileInfo.fileName()));
 }
 
+void AppSplitTunnelingUiController::setPackageInList(const QString &appName, const QString &packageName, const bool inList)
+{
+    if (packageName.isEmpty()) {
+        return;
+    }
+
+    amnezia::InstalledAppInfo appInfo { appName.isEmpty() ? packageName : appName, packageName, "" };
+    if (inList) {
+        m_appSplitTunnelingController->addApp(appInfo);
+    } else {
+        m_appSplitTunnelingController->removeApp(appInfo);
+    }
+}
+
+QVariantList AppSplitTunnelingUiController::getPackagesInList() const
+{
+    QVariantList apps;
+    for (const auto &app : m_appSplitTunnelingController->getApps()) {
+        if (app.packageName.isEmpty()) {
+            continue;
+        }
+        apps.append(QVariantMap { { "appName", app.appName }, { "packageName", app.packageName } });
+    }
+    return apps;
+}
+
 void AppSplitTunnelingUiController::toggleSplitTunneling(bool enabled)
 {
     m_appSplitTunnelingController->toggleSplitTunneling(enabled);

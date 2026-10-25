@@ -2,6 +2,7 @@
 #define APPSPLITTUNNELINGUICONTROLLER_H
 
 #include <QObject>
+#include <QVariantList>
 #include <QVector>
 
 #include "core/controllers/appSplitTunnelingController.h"
@@ -26,6 +27,9 @@ public slots:
     void addApp(const QString &appPath);
     void addApps(QVector<QPair<QString, QString>> apps);
     void removeApp(const int index);
+    // Lesha VPN: checkbox list of installed apps (Android)
+    void setPackageInList(const QString &appName, const QString &packageName, const bool inList);
+    QVariantList getPackagesInList() const;
     void toggleSplitTunneling(bool enabled);
     void setRouteMode(int routeMode);
 

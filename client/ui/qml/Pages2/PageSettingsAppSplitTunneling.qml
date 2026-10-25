@@ -7,6 +7,8 @@ import QtCore
 
 import SortFilterProxyModel 0.2
 
+import InstalledAppsModel 1.0
+
 import PageEnum 1.0
 import ContainerProps 1.0
 import Style 1.0
@@ -22,6 +24,9 @@ PageType {
 
     property bool pageEnabled
 
+    // Lesha VPN: on Android the page itself is the checkbox list of installed apps
+    readonly property bool isAndroid: Qt.platform.os === "android"
+
     Component.onCompleted: {
         if (ConnectionController.isConnected) {
             PageController.showNotificationMessage(qsTr("Cannot change split tunneling settings during active connection"))
@@ -29,6 +34,25 @@ PageType {
         } else {
             root.pageEnabled = true
         }
+
+        if (root.isAndroid) {
+            root.reloadInstalledApps()
+        }
+    }
+
+    // The order (checked, user, system) is fixed here, so toggling doesn't move rows until the page is reopened
+    function reloadInstalledApps() {
+        PageController.showBusyIndicator(true)
+        installedAppsModel.updateModel(AppSplitTunnelingController.getPackagesInList())
+        PageController.showBusyIndicator(false)
+    }
+
+    function escapeRegExp(text) {
+        return text.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")
+    }
+
+    InstalledAppsModel {
+        id: installedAppsModel
     }
 
     QtObject {
@@ -140,6 +164,10 @@ PageType {
                     target: AppSplitTunnelingController
                     function onRouteModeChanged() {
                         selectedIndex = getRouteModesModelIndex()
+                        // each mode has its own list of apps
+                        if (root.isAndroid) {
+                            root.reloadInstalledApps()
+                        }
                     }
                 }
             }
@@ -160,6 +188,8 @@ PageType {
 
     ListViewType {
         id: listView
+
+        visible: !root.isAndroid
 
         ScrollBar.vertical: ScrollBarType { policy: ScrollBar.AlwaysOn }
 
@@ -215,6 +245,83 @@ PageType {
         }
     }
 
+    ListViewType {
+        id: installedAppsListView
+
+        visible: root.isAndroid
+
+        ScrollBar.vertical: ScrollBarType { policy: ScrollBar.AlwaysOn }
+
+        anchors.top: header.bottom
+        anchors.topMargin: 16
+        anchors.bottom: parent.bottom
+        anchors.bottomMargin: addAppButton.implicitHeight + 48 + PageController.safeAreaBottomMargin + (searchField.textField.activeFocus ? 0 : PageController.imeHeight)
+        anchors.left: parent.left
+        anchors.right: parent.right
+        clip: true
+
+        model: SortFilterProxyModel {
+            id: proxyInstalledAppsModel
+            sourceModel: installedAppsModel
+            filters: RegExpFilter {
+                roleName: "appName"
+                pattern: ".*" + root.escapeRegExp(searchField.textField.text) + ".*"
+                caseSensitivity: Qt.CaseInsensitive
+            }
+        }
+
+        section.property: "group"
+        section.criteria: ViewSection.FullString
+        section.delegate: CaptionTextType {
+            required property string section
+
+            width: installedAppsListView.width
+            leftPadding: 16
+            rightPadding: 16
+            topPadding: 16
+            bottomPadding: 8
+
+            color: AmneziaStyle.color.mutedGray
+            text: section === "0" ? qsTr("Selected")
+                                  : section === "1" ? qsTr("Apps")
+                                                    : qsTr("System apps")
+        }
+
+        delegate: ColumnLayout {
+            width: installedAppsListView.width
+
+            RowLayout {
+                Layout.fillWidth: true
+                Layout.leftMargin: 16
+                Layout.rightMargin: 16
+
+                CheckBoxType {
+                    Layout.fillWidth: true
+
+                    enabled: root.pageEnabled
+                    text: appName
+                    descriptionText: group === InstalledAppsModel.SystemGroup ? packageName : ""
+                    checked: isAppSelected
+                    onToggled: {
+                        installedAppsModel.setAppSelected(proxyInstalledAppsModel.mapToSource(index), checked)
+                        AppSplitTunnelingController.setPackageInList(appName, packageName, checked)
+                    }
+                }
+
+                Image {
+                    source: "image://installedAppImage/" + appIcon
+
+                    sourceSize.width: 24
+                    sourceSize.height: 24
+
+                    Layout.rightMargin: 16
+                }
+            }
+
+            DividerType {}
+        }
+    }
+
     Rectangle {
         anchors.left: parent.left
         anchors.right: parent.right
@@ -243,7 +350,7 @@ PageType {
                 Layout.fillWidth: true
 
                 textField.placeholderText: qsTr("application name")
-                buttonImageSource: "qrc:/images/controls/plus.svg"
+                buttonImageSource: root.isAndroid ? "" : "qrc:/images/controls/plus.svg"
 
                 rightButtonClickedOnEnter: true
 
@@ -257,19 +364,11 @@ PageType {
                         if (fileName !== "") {
                             AppSplitTunnelingController.addApp(fileName)
                         }
-                    } else if (Qt.platform.os === "android"){
-                        installedAppDrawer.openTriggered()
                     }
 
                     PageController.showBusyIndicator(false)
                 }
             }
         }
-    }
-
-    InstalledAppsDrawer {
-        id: installedAppDrawer
-
-        anchors.fill: parent
     }
 }
