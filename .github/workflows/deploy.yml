@@ -583,6 +583,11 @@ jobs:
         # the APK must carry native libs for every ABI built above (an armv7 TV got an arm64-only APK)
         for abi in arm64-v8a armeabi-v7a; do
           unzip -l "$APK" "lib/$abi/libLeshaVPN_$abi.so" >/dev/null || { echo "::error::no lib/$abi in $APK"; unzip -l "$APK" 'lib/*'; exit 1; }
+          # and every ABI must have the coordinator URL baked in (QStringLiteral: UTF-16LE)
+          if [ -n "$COORDINATOR_API_URL" ]; then
+            unzip -p "$APK" "lib/$abi/libLeshaVPN_$abi.so" | strings -el | grep -qF "$COORDINATOR_API_URL" \
+              || { echo "::error::lib/$abi in $APK lacks COORDINATOR_API_URL"; exit 1; }
+          fi
         done
         # LeshaVPN_<platform>_<version>.apk, hyphens inside <platform>
         mv "$APK" "$OUT/LeshaVPN_${LABEL}-universal${APK_SUFFIX}_${VERSION}.apk"
