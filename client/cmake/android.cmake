@@ -18,7 +18,8 @@ set_target_properties(${PROJECT} PROPERTIES
     QT_ANDROID_SDK_BUILD_TOOLS_REVISION 36.0.0
 )
 
-set(QT_ANDROID_MULTI_ABI_FORWARD_VARS "QT_NO_GLOBAL_APK_TARGET_PART_OF_ALL;CMAKE_BUILD_TYPE")
+# Fork: COORDINATOR_API_URL too, else the non-main ABI (armeabi-v7a) is built without the baked-in URL
+set(QT_ANDROID_MULTI_ABI_FORWARD_VARS "QT_NO_GLOBAL_APK_TARGET_PART_OF_ALL;CMAKE_BUILD_TYPE;COORDINATOR_API_URL")
 
 # We need to include qtprivate api's
 # As QAndroidBinder is not yet implemented with a public api
