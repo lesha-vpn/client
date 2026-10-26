@@ -11,7 +11,7 @@ endif()
 # fork release and never reset it (not even when merging a new upstream AMNEZIAVPN_VERSION), because
 # the Android versionCode, the MSI version and the Apple build number are derived from it.
 if(NOT LESHA_VERSION)
-    set(LESHA_VERSION 7 CACHE STRING "Fork release number (bump by 1 per release, never reset)")
+    set(LESHA_VERSION 8 CACHE STRING "Fork release number (bump by 1 per release, never reset)")
 endif()
 
 set(QT_CREATOR_SKIP_PACKAGE_MANAGER_SETUP ON CACHE BOOL "" FORCE)
