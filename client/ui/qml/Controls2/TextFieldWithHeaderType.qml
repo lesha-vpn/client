@@ -109,6 +109,17 @@ Item {
                             FocusController.previousKeyTabItem()
                         }
 
+                        // Fork: Qt opens the Android keyboard only on a tap, so on a TV, where the field
+                        // gets focus from the remote's D-pad, the OK button opens it instead
+                        Keys.onPressed: function(event) {
+                            if (Qt.platform.os === "android" && !Qt.inputMethod.visible
+                                    && (event.key === Qt.Key_Select || event.key === Qt.Key_Return
+                                        || event.key === Qt.Key_Enter)) {
+                                Qt.inputMethod.show()
+                                event.accepted = true
+                            }
+                        }
+
                         enabled: root.textFieldEditable
                         color: root.enabled ? root.textFieldTextColor : root.textFieldTextDisabledColor
 
