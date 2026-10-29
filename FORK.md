@@ -385,6 +385,13 @@ longer installed are shown checked so they can be removed. Windows keeps upstrea
 - Test: `tests/testUiAppSTModelAndController.cpp` (`testInstalledAppsCheckboxList`). Strings `Selected`, `Apps`, `System apps`.
 How to resolve: keep the fork's page/model; if upstream changes the drawer or the model, port its fixes into the page.
 
+## 14. Android TV: OK on the remote opens the keyboard in text fields
+Qt shows the Android soft keyboard only when a field is tapped, so on a TV a text field focused with the D-pad never got a
+keyboard. `ui/qml/Controls2/TextFieldWithHeaderType.qml`: on Android, OK/Enter (`Key_Select`/`Key_Return`/`Key_Enter`;
+`AmneziaActivity` already turns DPAD_CENTER into ENTER) while the keyboard is hidden calls `Qt.inputMethod.show()` instead of
+being handled as Enter.
+How to resolve: keep the `Keys.onPressed` hunk on the inner `TextField`.
+
 ## Translations
 Fork UI strings are **English source text** in `qsTr()`/`tr()`, like upstream's, and every fork string has a finished
 translation in all 12 shipped `client/translations/amneziavpn_*.ts` (ru_RU, uk_UA, es_ES, fr_FR, ar_EG, fa_IR, hi_IN, ko_KR,
