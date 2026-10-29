@@ -361,7 +361,8 @@ Upstream's VPN service saves the config (`LAST_CONF` in `Prefs`) only when the a
 connect with that saved copy. After the coordinator replaced a config (e.g. the entry node moved) they kept using the dead
 one until the user connected once from the app. Now every change of the default server or its config (`serverEdited`,
 `serverAdded` as default, `defaultServerChanged`) pushes the freshly built connection config (same JSON as on connect,
-split tunneling included) to the service without connecting.
+split tunneling included) to the service without connecting. The coordinator bypass in that config depends on the
+coordinator address and the sign-in, so `CoordinatorController::apiAddressChanged` and `loggedInChanged` push it too.
 - `core/controllers/coreSignalHandlers.cpp` (`initAndroidSettingsHandler`) → `ConnectionController::saveAndroidConfig`
   (`core/controllers/connectionController.{h,cpp}`, signal `saveAndroidConfigRequested`) → `VpnConnection::saveAndroidConfig`
   (`client/vpnConnection.{h,cpp}`) → `AndroidController::saveConfig` (`platforms/android/android_controller.{h,cpp}`) →

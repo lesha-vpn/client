@@ -9,6 +9,8 @@
 #include <QSysInfo>
 #include <QUrl>
 
+#include <memory>
+
 #include "core/controllers/connectionController.h"
 #include "core/controllers/coordinator/deviceName.h"
 #include "core/controllers/selfhosted/importController.h"
@@ -79,11 +81,13 @@ CoordinatorController::CoordinatorController(SecureServersRepository *serversRep
         m_api->setFallbackAddress(address);
         if (m_appSettingsRepository->coordinatorApiAddress() != address) {
             m_appSettingsRepository->setCoordinatorApiAddress(address);
+            emit apiAddressChanged();
         }
     });
 
-    m_refreshTimer.setInterval(refreshIntervalMsecs);
-    connect(&m_refreshTimer, &QTimer::timeout, this, &CoordinatorController::refreshAll);
+    // A fixed tick: setInterval() on a running timer restarts it, so frequent state flips would starve the check
+    m_refreshTimer.setInterval(connectedRefreshIntervalMsecs);
+    connect(&m_refreshTimer, &QTimer::timeout, this, &CoordinatorController::onRefreshTimer);
 
     connect(m_serversRepository, &SecureServersRepository::serverRemoved, this,
             [this](const QString &serverId, int) { onServerRemoved(serverId); });
@@ -98,7 +102,6 @@ CoordinatorController::CoordinatorController(SecureServersRepository *serversRep
         m_refreshTimer.stop();
         m_pendingReconnectServerId.clear();
         emit loggedInChanged();
-        emit managedConfigsChanged();
     });
 }
 
@@ -137,9 +140,6 @@ void CoordinatorController::start()
 void CoordinatorController::login(const QString &baseUrl, const QString &code)
 {
     QString url = baseUrl.trimmed();
-    while (url.endsWith('/')) {
-        url.chop(1);
-    }
     if (!url.isEmpty() && !url.contains(QLatin1String("://"))) {
         url.prepend(QLatin1String("https://"));
     }
@@ -156,6 +156,7 @@ void CoordinatorController::login(const QString &baseUrl, const QString &code)
     normalizedCode = normalizedCode.toUpper();
 
     m_api->setBaseUrl(url);
+    url = m_api->baseUrl(); // without trailing slashes
     allowThroughKillSwitch();
     beginBusy();
     m_api->login(normalizedCode, deviceLabel(), [this, url](const CoordinatorApi::Reply &reply) {
@@ -168,6 +169,12 @@ void CoordinatorController::login(const QString &baseUrl, const QString &code)
             return;
         }
 
+        // The known address belongs to the previous host (setBaseUrl() already dropped the API's copy)
+        const bool hostChanged = QUrl(url).host() != QUrl(m_appSettingsRepository->coordinatorBaseUrl()).host();
+        if (hostChanged && !m_appSettingsRepository->coordinatorApiAddress().isEmpty()) {
+            m_appSettingsRepository->setCoordinatorApiAddress(QString());
+            emit apiAddressChanged();
+        }
         m_appSettingsRepository->setCoordinatorBaseUrl(url);
         m_appSettingsRepository->setCoordinatorToken(token);
         m_appSettingsRepository->setCoordinatorUser(reply.body.value("user").toObject());
@@ -204,20 +211,42 @@ void CoordinatorController::forgetDevice()
         return;
     }
     allowThroughKillSwitch();
-    // Requests capture the token when sent, so the reset may wipe it right after this returns
+    QStringList configIds;
     const QJsonObject managed = managedConfigs();
     for (auto it = managed.constBegin(); it != managed.constEnd(); ++it) {
         const QJsonObject entry = it.value().toObject();
-        if (entry.value(entryKey::state).toString() == QLatin1String("revoked")) {
-            continue;
+        if (entry.value(entryKey::state).toString() != QLatin1String("revoked")) {
+            configIds.append(entry.value(entryKey::configId).toString());
         }
-        m_api->deleteConfig(entry.value(entryKey::configId).toString(), [](const CoordinatorApi::Reply &reply) {
+    }
+
+    // The reset wipes the account right after this returns: requests capture the token when sent, and the logout,
+    // which must wait for the deletes (a revoked token would fail them with 401), carries its own copy.
+    const QString baseUrl = m_api->baseUrl();
+    const QString token = m_appSettingsRepository->coordinatorToken();
+    CoordinatorApi *api = m_api;
+    const auto logout = [api, baseUrl, token]() {
+        api->logout(baseUrl, token, [](const CoordinatorApi::Reply &reply) {
+            if (!reply.ok()) {
+                qWarning() << "CoordinatorController::forgetDevice(): server-side logout failed:" << reply.httpStatus << reply.errorMessage;
+            }
+        });
+    };
+    if (configIds.isEmpty()) {
+        logout();
+        return;
+    }
+    const auto pending = std::make_shared<int>(configIds.size());
+    for (const QString &configId : std::as_const(configIds)) {
+        m_api->deleteConfig(configId, [pending, logout](const CoordinatorApi::Reply &reply) {
             if (!reply.ok() && !reply.notFound()) {
                 qWarning() << "CoordinatorController::forgetDevice(): config revoke failed:" << reply.httpStatus << reply.errorMessage;
             }
+            if (--*pending == 0) {
+                logout();
+            }
         });
     }
-    m_api->logout([](const CoordinatorApi::Reply &) {});
 }
 
 void CoordinatorController::fetchRemoteConfigs()
@@ -225,16 +254,17 @@ void CoordinatorController::fetchRemoteConfigs()
     if (!isLoggedIn()) {
         return;
     }
-    allowThroughKillSwitch();
     beginBusy();
-    m_api->me([this](const CoordinatorApi::Reply &reply) {
-        endBusy();
+    requestMe(true, [this](const std::optional<QJsonArray> &) { endBusy(); });
+}
+
+void CoordinatorController::requestMe(bool notify, const std::function<void(const std::optional<QJsonArray> &)> &done)
+{
+    allowThroughKillSwitch();
+    m_api->me([this, notify, done](const CoordinatorApi::Reply &reply) {
         if (!reply.ok()) {
-            if (reply.unauthorized() || reply.notMember()) {
-                handleAuthError(reply);
-            } else {
-                emit errorOccurred(describeError(reply));
-            }
+            reportError(reply);
+            done(std::nullopt);
             return;
         }
         m_notMemberReported = false;
@@ -244,7 +274,9 @@ void CoordinatorController::fetchRemoteConfigs()
             m_appSettingsRepository->setCoordinatorUser(user);
         }
 
-        emit remoteConfigsUpdated(reconcile(reply.body.value("configs").toArray(), true));
+        const QJsonArray configs = reconcile(reply.body.value("configs").toArray(), notify);
+        emit remoteConfigsUpdated(configs);
+        done(configs);
     });
 }
 
@@ -282,9 +314,6 @@ QJsonArray CoordinatorController::reconcile(const QJsonArray &remoteConfigs, boo
         const QString configId = summary.value("id").toString();
         const QString serverId = serverIdForConfig(configId);
         summary["inApp"] = !serverId.isEmpty();
-        if (summary.value("state").toString().isEmpty() && !serverId.isEmpty()) {
-            summary["state"] = updated.value(serverId).toObject().value(entryKey::state).toString();
-        }
         // Follow renames made elsewhere (the bot); a rename doesn't change the revision, so applyConfig won't see it
         const QString name = summary.value("name").toString();
         if (!serverId.isEmpty() && !name.isEmpty()) {
@@ -330,11 +359,8 @@ void CoordinatorController::createConfig(const QString &name)
         endBusy();
         if (reply.ok()) {
             applyConfig(reply.body, QString());
-        } else if (reply.unauthorized() || reply.notMember()) {
-            handleAuthError(reply);
+        } else if (reportError(reply)) {
             return;
-        } else {
-            emit errorOccurred(describeError(reply));
         }
         fetchRemoteConfigs();
     });
@@ -358,11 +384,8 @@ void CoordinatorController::addConfigToApp(const QString &configId)
         endBusy();
         if (reply.ok()) {
             applyConfig(reply.body, QString());
-        } else if (reply.unauthorized() || reply.notMember()) {
-            handleAuthError(reply);
+        } else if (reportError(reply)) {
             return;
-        } else {
-            emit errorOccurred(describeError(reply));
         }
         fetchRemoteConfigs();
     });
@@ -375,31 +398,17 @@ void CoordinatorController::setupThisDevice()
         return;
     }
 
-    allowThroughKillSwitch();
     beginBusy();
-    m_api->me([this](const CoordinatorApi::Reply &reply) {
-        if (!reply.ok()) {
+    // Managed entries left from a revoked config or another account don't count as this device's config
+    requestMe(false, [this](const std::optional<QJsonArray> &remoteConfigs) {
+        if (!remoteConfigs) {
             endBusy();
-            if (reply.unauthorized() || reply.notMember()) {
-                handleAuthError(reply);
-            } else {
-                emit errorOccurred(describeError(reply));
-            }
             emit deviceSetupFinished(false);
             return;
         }
-        m_notMemberReported = false;
-        const QJsonObject user = reply.body.value("user").toObject();
-        if (!user.isEmpty()) {
-            m_appSettingsRepository->setCoordinatorUser(user);
-        }
-
-        // Managed entries left from a revoked config or another account don't count as this device's config
-        const QJsonArray remoteConfigs = reconcile(reply.body.value("configs").toArray(), false);
-        emit remoteConfigsUpdated(remoteConfigs);
         QStringList takenNames;
         bool hasLiveConfig = false;
-        for (const QJsonValue &value : remoteConfigs) {
+        for (const QJsonValue &value : *remoteConfigs) {
             const QJsonObject summary = value.toObject();
             takenNames.append(summary.value("name").toString());
             hasLiveConfig = hasLiveConfig || summary.value("inApp").toBool();
@@ -416,11 +425,13 @@ void CoordinatorController::setupThisDevice()
             bool added = false;
             if (reply.ok()) {
                 // Take the place of a dead config instead of leaving it next to the new one
-                added = applyConfig(reply.body, revokedServerToReplace());
-            } else if (reply.unauthorized() || reply.notMember()) {
-                handleAuthError(reply);
+                const QString replacedServerId = revokedServerToReplace();
+                added = applyConfig(reply.body, replacedServerId);
+                if (added && !replacedServerId.isEmpty()) {
+                    reconnectIfActive(replacedServerId);
+                }
             } else {
-                emit errorOccurred(describeError(reply));
+                reportError(reply);
             }
             emit deviceSetupFinished(added);
             if (isLoggedIn()) {
@@ -468,11 +479,8 @@ void CoordinatorController::renameConfig(const QString &configId, const QString 
                 setManagedEntry(serverId, entry);
             }
             emit configRenamed(configId, newName);
-        } else if (reply.unauthorized() || reply.notMember()) {
-            handleAuthError(reply);
+        } else if (reportError(reply)) {
             return;
-        } else {
-            emit errorOccurred(describeError(reply));
         }
         fetchRemoteConfigs();
     });
@@ -490,11 +498,7 @@ void CoordinatorController::deleteConfig(const QString &configId)
         if (reply.ok() || reply.notFound()) {
             const QString serverId = serverIdForConfig(configId);
             if (!serverId.isEmpty()) {
-                const bool active = m_connectionState == Vpn::ConnectionState::Connected
-                        || m_connectionState == Vpn::ConnectionState::Connecting
-                        || m_connectionState == Vpn::ConnectionState::Reconnecting
-                        || m_connectionState == Vpn::ConnectionState::Preparing;
-                if (active && m_serversRepository->defaultServerId() == serverId) {
+                if (isConnectionActive() && m_serversRepository->defaultServerId() == serverId) {
                     // Also while connecting or reconnecting: the revoked key must not stay up
                     m_pendingReconnectServerId.clear();
                     m_connectionController->closeConnection();
@@ -506,11 +510,8 @@ void CoordinatorController::deleteConfig(const QString &configId)
                 }
             }
             emit configDeleted(configId);
-        } else if (reply.unauthorized() || reply.notMember()) {
-            handleAuthError(reply);
+        } else if (reportError(reply)) {
             return;
-        } else {
-            emit errorOccurred(describeError(reply));
         }
         fetchRemoteConfigs();
     });
@@ -521,14 +522,32 @@ void CoordinatorController::refreshAll()
     if (!isLoggedIn()) {
         return;
     }
-    const QStringList serverIds = managedConfigs().keys();
+    m_lastRefreshMsecs = QDateTime::currentMSecsSinceEpoch();
+    // A revoked config never comes back by itself; GET /me (reconcile) resets the state if it reappears
+    QStringList serverIds;
+    const QJsonObject managed = managedConfigs();
+    for (auto it = managed.constBegin(); it != managed.constEnd(); ++it) {
+        if (it.value().toObject().value(entryKey::state).toString() != QLatin1String("revoked")) {
+            serverIds.append(it.key());
+        }
+    }
     if (serverIds.isEmpty()) {
         return;
     }
     allowThroughKillSwitch();
-    for (const QString &serverId : serverIds) {
+    for (const QString &serverId : std::as_const(serverIds)) {
         checkConfig(serverId);
     }
+}
+
+void CoordinatorController::onRefreshTimer()
+{
+    const bool connected = m_connectionState == Vpn::ConnectionState::Connected
+            && isManagedServer(m_serversRepository->defaultServerId());
+    if (!connected && QDateTime::currentMSecsSinceEpoch() - m_lastRefreshMsecs < refreshIntervalMsecs) {
+        return;
+    }
+    refreshAll();
 }
 
 QString CoordinatorController::serverIdForConfig(const QString &configId) const
@@ -563,7 +582,8 @@ QJsonObject CoordinatorController::managedConfigs() const
 void CoordinatorController::onConnectionStateChanged(Vpn::ConnectionState state)
 {
     m_connectionState = state;
-    updateRefreshInterval();
+    // The service resets the kill switch's allowed ranges as the connection goes up or down
+    m_killSwitchAllowed.clear();
 
     if (!m_pendingReconnectServerId.isEmpty()
         && (state == Vpn::ConnectionState::Disconnected || state == Vpn::ConnectionState::Error)) {
@@ -590,13 +610,16 @@ void CoordinatorController::onConnectionStateChanged(Vpn::ConnectionState state)
     }
 }
 
-void CoordinatorController::updateRefreshInterval()
+bool CoordinatorController::isConnectionActive() const
 {
-    const bool connected = m_connectionState == Vpn::ConnectionState::Connected
-            && isManagedServer(m_serversRepository->defaultServerId());
-    const int interval = connected ? connectedRefreshIntervalMsecs : refreshIntervalMsecs;
-    if (m_refreshTimer.interval() != interval) {
-        m_refreshTimer.setInterval(interval); // restarts the timer if it is running
+    switch (m_connectionState) {
+    case Vpn::ConnectionState::Connected:
+    case Vpn::ConnectionState::Connecting:
+    case Vpn::ConnectionState::Reconnecting:
+    case Vpn::ConnectionState::Preparing:
+        return true;
+    default:
+        return false;
     }
 }
 
@@ -617,11 +640,13 @@ void CoordinatorController::checkConfig(const QString &serverId)
     }
     const QJsonObject entry = managedConfigs().value(serverId).toObject();
     const QString configId = entry.value(entryKey::configId).toString();
-    if (configId.isEmpty()) {
-        return;
+    if (configId.isEmpty() || m_checksInFlight.contains(serverId)) {
+        return; // one at a time: two downloads of the same update would apply and reconnect twice
     }
 
+    m_checksInFlight.insert(serverId);
     m_api->configStatus(configId, entry.value(entryKey::revision).toString(), [this, serverId, configId](const CoordinatorApi::Reply &reply) {
+        m_checksInFlight.remove(serverId);
         if (reply.networkError) {
             qWarning() << "CoordinatorController: status check failed for" << configId << reply.errorMessage;
             return;
@@ -661,12 +686,18 @@ void CoordinatorController::checkConfig(const QString &serverId)
         if (state == QLatin1String("ok")) {
             setManagedState(serverId, state);
         } else if (state == QLatin1String("outdated")) {
+            m_checksInFlight.insert(serverId);
             m_api->getConfig(configId, [this, serverId, markRevoked](const CoordinatorApi::Reply &configReply) {
+                m_checksInFlight.remove(serverId);
                 if (!isManagedServer(serverId)) {
                     return;
                 }
                 if (configReply.ok()) {
-                    if (applyConfig(configReply.body, serverId)) {
+                    const QString revision = configReply.body.value("revision").toString();
+                    if (!revision.isEmpty()
+                        && revision == managedConfigs().value(serverId).toObject().value(entryKey::revision).toString()) {
+                        setManagedState(serverId, QStringLiteral("ok")); // already applied
+                    } else if (applyConfig(configReply.body, serverId)) {
                         reconnectIfActive(serverId);
                     }
                 } else if (configReply.unauthorized() || configReply.notMember()) {
@@ -771,13 +802,23 @@ void CoordinatorController::handleAuthError(const CoordinatorApi::Reply &reply)
         m_api->setToken(QString());
         m_refreshTimer.stop();
         emit loggedInChanged();
-        emit errorOccurred(tr("You have been signed out. Sign in again with a code from the bot"));
+        emit errorOccurred(describeError(reply));
     } else if (reply.notMember()) {
         if (!m_notMemberReported) {
             m_notMemberReported = true;
-            emit errorOccurred(tr("You are no longer a member of the chat, VPN access is suspended"));
+            emit errorOccurred(describeError(reply));
         }
     }
+}
+
+bool CoordinatorController::reportError(const CoordinatorApi::Reply &reply)
+{
+    if (reply.unauthorized() || reply.notMember()) {
+        handleAuthError(reply);
+        return true;
+    }
+    emit errorOccurred(describeError(reply));
+    return false;
 }
 
 QString CoordinatorController::describeError(const CoordinatorApi::Reply &reply) const
@@ -827,7 +868,6 @@ void CoordinatorController::setManagedEntry(const QString &serverId, const QJson
         managed[serverId] = entry;
     }
     m_appSettingsRepository->setCoordinatorConfigs(managed);
-    emit managedConfigsChanged();
 }
 
 bool CoordinatorController::setManagedState(const QString &serverId, const QString &state)
@@ -846,25 +886,16 @@ void CoordinatorController::reconnectIfActive(const QString &serverId)
     if (m_serversRepository->defaultServerId() != serverId) {
         return;
     }
-    switch (m_connectionState) {
-    case Vpn::ConnectionState::Connected:
-    case Vpn::ConnectionState::Connecting:
-    case Vpn::ConnectionState::Reconnecting:
-    case Vpn::ConnectionState::Preparing:
+    if (isConnectionActive()) {
         m_pendingReconnectServerId = serverId;
         m_pendingReconnectMsecs = QDateTime::currentMSecsSinceEpoch();
         m_connectionController->closeConnection();
-        break;
-    case Vpn::ConnectionState::Error: {
+    } else if (m_connectionState == Vpn::ConnectionState::Error) {
         // The old config failed (dead entry node); the new one is the fix, so use it right away
         const ErrorCode error = m_connectionController->openConnection(serverId);
         if (error != ErrorCode::NoError) {
             qWarning() << "CoordinatorController: reconnect after config update failed:" << errorString(error);
         }
-        break;
-    }
-    default:
-        break;
     }
 }
 
@@ -886,16 +917,29 @@ void CoordinatorController::allowThroughKillSwitch()
 {
 #ifdef AMNEZIA_DESKTOP
     if (!m_appSettingsRepository->isStrictKillSwitchEnabled()) {
+        m_killSwitchAllowed.clear(); // turning it on again starts from a fresh ruleset
         return;
     }
-    auto allow = [](const QStringList &ips) {
-        if (ips.isEmpty()) {
+    // Every call reapplies the whole firewall ruleset and blocks for up to a second: only send new addresses
+    auto allow = [this](const QStringList &ips) {
+        QStringList added;
+        for (const QString &ip : ips) {
+            if (!m_killSwitchAllowed.contains(ip) && !added.contains(ip)) {
+                added.append(ip);
+            }
+        }
+        if (added.isEmpty()) {
             return;
         }
         IpcClient::withInterface([&](QSharedPointer<IpcInterfaceReplica> iface) {
-            QRemoteObjectPendingReply<bool> reply = iface->addKillSwitchAllowedRange(ips);
-            if (!reply.waitForFinished(1000) || !reply.returnValue())
+            QRemoteObjectPendingReply<bool> reply = iface->addKillSwitchAllowedRange(added);
+            if (!reply.waitForFinished(1000) || !reply.returnValue()) {
                 qWarning() << "CoordinatorController::allowThroughKillSwitch(): Failed to execute remote addKillSwitchAllowedRange call";
+                return;
+            }
+            for (const QString &ip : std::as_const(added)) {
+                m_killSwitchAllowed.insert(ip);
+            }
         });
     };
 

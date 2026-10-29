@@ -1,7 +1,6 @@
 #include "coordinatorUiController.h"
 
 #include <QJsonArray>
-#include <QRegularExpression>
 
 #include "core/controllers/coordinator/coordinatorController.h"
 #include "core/controllers/coordinator/deviceName.h"
@@ -101,16 +100,6 @@ void CoordinatorUiController::fetchRemoteConfigs()
     m_coordinatorController->fetchRemoteConfigs();
 }
 
-void CoordinatorUiController::createConfig(const QString &name)
-{
-    m_coordinatorController->createConfig(name);
-}
-
-void CoordinatorUiController::addConfigToApp(const QString &configId)
-{
-    m_coordinatorController->addConfigToApp(configId);
-}
-
 void CoordinatorUiController::deleteConfig(const QString &configId)
 {
     m_coordinatorController->deleteConfig(configId);
@@ -126,25 +115,9 @@ void CoordinatorUiController::setupThisDevice()
     m_coordinatorController->setupThisDevice();
 }
 
-void CoordinatorUiController::refreshAll()
-{
-    m_coordinatorController->refreshAll();
-}
-
-bool CoordinatorUiController::isValidConfigName(const QString &name) const
-{
-    static const QRegularExpression configNameRegExp(QStringLiteral("^[a-z0-9-]{1,32}$"));
-    return configNameRegExp.match(name).hasMatch();
-}
-
 QString CoordinatorUiController::toConfigName(const QString &text) const
 {
     return deviceName::toConfigName(text);
-}
-
-bool CoordinatorUiController::isManagedServer(const QString &serverId) const
-{
-    return m_coordinatorController->isManagedServer(serverId);
 }
 
 QString CoordinatorUiController::configIdForServer(const QString &serverId) const

@@ -4,8 +4,12 @@
 #include <QJsonArray>
 #include <QJsonObject>
 #include <QObject>
+#include <QSet>
 #include <QString>
 #include <QTimer>
+
+#include <functional>
+#include <optional>
 
 #include "core/controllers/coordinator/coordinatorApi.h"
 #include "core/protocols/vpnProtocol.h"
@@ -60,7 +64,8 @@ public:
     // takenNames; fallback (the OS) when the name gives nothing usable.
     static QString deviceConfigName(const QString &deviceName, const QString &fallback, const QStringList &takenNames);
 
-    // Check every managed config (status -> fetch if outdated -> replace in place). Silent on network errors.
+    // Check every managed config that isn't revoked (status -> fetch if outdated -> replace in place).
+    // Silent on network errors.
     void refreshAll();
 
     // storageServerId of the managed server for configId, or empty.
@@ -74,7 +79,8 @@ public:
     void start();
 
     static constexpr int refreshIntervalMsecs = 15 * 60 * 1000;
-    // While connected to a managed server: a replaced entry node looks like a silent tunnel, not an error
+    // While connected to a managed server: a replaced entry node looks like a silent tunnel, not an error.
+    // The timer always ticks at this interval; when not connected a tick only refreshes once refreshIntervalMsecs passed.
     static constexpr int connectedRefreshIntervalMsecs = 2 * 60 * 1000;
     // A reconnect requested after a config update only applies to the disconnect it caused
     static constexpr qint64 pendingReconnectTimeoutMsecs = 30 * 1000;
@@ -88,7 +94,8 @@ signals:
     void configRenamed(const QString &configId, const QString &name);
     void configDeleted(const QString &configId); // deleted on the coordinator and its server removed from the app
     void deviceSetupFinished(bool success);
-    void managedConfigsChanged();
+    // The stored coordinator address (coordinatorApiAddress, excluded from the tunnel) changed
+    void apiAddressChanged();
     // Human-readable problem for the user (not member, suspended, revoked, re-login needed, request failed).
     void errorOccurred(const QString &text);
     void busyChanged(bool busy);
@@ -98,7 +105,11 @@ private:
     void onConnectionStateChanged(Vpn::ConnectionState state);
     void onServerRemoved(const QString &serverId);
 
+    void onRefreshTimer();
     void checkConfig(const QString &serverId);
+    // GET /v1/me: stores the user, reconciles the managed entries and emits remoteConfigsUpdated().
+    // done gets the summaries, or nullopt on failure (already reported).
+    void requestMe(bool notify, const std::function<void(const std::optional<QJsonArray> &)> &done);
     // Sync managed entries with GET /v1/me: entries missing there are revoked, suspended ones are marked.
     // Returns the summaries for remoteConfigsUpdated().
     QJsonArray reconcile(const QJsonArray &remoteConfigs, bool notify);
@@ -106,10 +117,12 @@ private:
     QString revokedServerToReplace() const;
     void beginBusy();
     void endBusy();
-    void updateRefreshInterval();
+    bool isConnectionActive() const; // connected or on the way there
     // Import Config JSON (from GET/POST) as a new server or replace serverId's config if non-empty.
     bool applyConfig(const QJsonObject &config, const QString &existingServerId);
     void handleAuthError(const CoordinatorApi::Reply &reply); // 401 -> forget token; 403 not_member -> message
+    // Failed request: auth errors go to handleAuthError(), the rest to errorOccurred(). True for an auth error.
+    bool reportError(const CoordinatorApi::Reply &reply);
     QString describeError(const CoordinatorApi::Reply &reply) const;
     void setManagedEntry(const QString &serverId, const QJsonObject &entry); // empty entry removes it
     bool setManagedState(const QString &serverId, const QString &state); // true if the stored state changed
@@ -124,6 +137,9 @@ private:
     CoordinatorApi *m_api;
 
     QTimer m_refreshTimer;
+    qint64 m_lastRefreshMsecs = 0;
+    QSet<QString> m_checksInFlight; // serverIds with a status check or download running
+    QSet<QString> m_killSwitchAllowed; // addresses already allowed through the strict kill switch in this connection state
     QString m_lastNetworkState;
     QString m_pendingReconnectServerId;
     qint64 m_pendingReconnectMsecs = 0;
